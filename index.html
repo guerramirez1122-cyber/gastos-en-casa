@@ -220,6 +220,18 @@
   </div>
 </div>
 
+<div id="gate" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:200;align-items:center;justify-content:center;padding:24px;">
+  <div style="width:100%;max-width:320px;text-align:center">
+    <div style="font-size:32px;margin-bottom:10px">🔒</div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:6px">Gastos en Casa</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:16px">Ingresá la clave para ver los datos</div>
+    <input id="gate-pass" type="password" placeholder="Clave" onkeydown="if(event.key==='Enter')submitGate()"
+      style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:15px;padding:12px;outline:none;margin-bottom:10px">
+    <div id="gate-msg" style="font-size:12px;color:var(--red);min-height:16px;margin-bottom:6px"></div>
+    <button class="btn" onclick="submitGate()">Entrar</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <nav class="nav">
@@ -231,12 +243,8 @@
 </nav>
 
 <script>
-const URLS = {
-  gastos: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQY_xIArJdWsJmKjUSs0ZxwJG3GtFtmzb5R4BptDZi3-9Wt7ZdB2L0MjBzk3oLnry1j0zGAbUblEyH5/pub?gid=1454460375&single=true&output=csv',
-  ingresos: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQY_xIArJdWsJmKjUSs0ZxwJG3GtFtmzb5R4BptDZi3-9Wt7ZdB2L0MjBzk3oLnry1j0zGAbUblEyH5/pub?gid=2093558664&single=true&output=csv',
-  deudas: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQY_xIArJdWsJmKjUSs0ZxwJG3GtFtmzb5R4BptDZi3-9Wt7ZdB2L0MjBzk3oLnry1j0zGAbUblEyH5/pub?gid=675642291&single=true&output=csv',
-};
-const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdwPL2GIpj4Onpr2zN6QGSKUF8gOuX-iKXCKWJl2_93R7vOqg/viewform?usp=header'; // el link normal del form (Enviar → ícono de link)
+const API_URL = 'https://script.google.com/macros/s/AKfycbwnXT8ay_IMEvdeoyH5NpDOMjrjC4Jbn3h6Kc3nbWjN8ajO7G-4QptUaR2_63bQVFs/exec';
+const FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSdwPL2GIpj4Onpr2zN6QGSKUF8gOuX-iKXCKWJl2_93R7vOqg/viewform'; // el link normal del form (Enviar → ícono de link)
 const PRESUPUESTO_ALIM = 500000;
 const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 const CAT_COLORS = {'Fiambrería':'#e8834a','Fiambres':'#e8834a','Frutas':'#2ecc8a','Verduras':'#2ecc8a','Hierbas':'#2ecc8a','Snacks':'#f5c842','Golosinas':'#f5c842','Lácteos':'#5b9cf6','Pastas':'#a78bfa','Cereales':'#a78bfa','Legumbres':'#a78bfa','Bebidas':'#2ecc8a','Infusiones':'#5b9cf6','Harinas':'#e8834a','Panadería':'#e8834a','Higiene':'#a78bfa','Limpieza':'#5b9cf6','Hogar':'#555','Proteínas':'#e8834a','Especias':'#2ecc8a'};
@@ -276,17 +284,35 @@ function getWeek(dateStr, startStr) {
   return Math.floor((new Date(dateStr) - new Date(startStr)) / (7*86400000));
 }
 
+function getToken() { try { return localStorage.getItem('gc_token') || ''; } catch(e) { return ''; } }
+function setToken(t) { try { localStorage.setItem('gc_token', t); } catch(e) {} }
+function clearToken() { try { localStorage.removeItem('gc_token'); } catch(e) {} }
+function showGate(msg) {
+  $('gate').style.display = 'flex';
+  $('gate-msg').textContent = msg || '';
+  setTimeout(() => $('gate-pass').focus(), 50);
+}
+function submitGate() {
+  const v = $('gate-pass').value.trim();
+  if (!v) return;
+  setToken(v);
+  $('gate').style.display = 'none';
+  loadAll();
+}
+
 async function loadAll() {
+  const token = getToken();
+  if (!token) { showGate(); return; }
   try {
-    const [rG, rI, rD] = await Promise.all([
-      fetch(URLS.gastos), fetch(URLS.ingresos), fetch(URLS.deudas)
-    ]);
-    const [tG, tI, tD] = await Promise.all([rG.text(), rI.text(), rD.text()]);
-    allRows = parseCSV(tG).map(r => ({...r, fecha: normFecha(r.fecha)})).filter(r => r.fecha && r.total && parseFloat(r.total) > 0);
-    allIngresos = parseCSV(tI).filter(r => r.persona && r.monto);
-    allDeudas = parseCSV(tD).filter(r => r.nombre);
+    const res = await fetch(API_URL + '?token=' + encodeURIComponent(token));
+    const data = await res.json();
+    if (data.error) { clearToken(); showGate('Clave incorrecta'); return; }
+    allRows = (data.gastos || []).map(r => ({...r, fecha: normFecha(r.fecha)}))
+      .filter(r => r.fecha && r.total && parseFloat(r.total) > 0);
+    allIngresos = (data.ingresos || []).filter(r => r.persona && r.monto);
+    allDeudas = (data.deudas || []).filter(r => r.nombre);
     const fechas = allRows.map(r => r.fecha).sort();
-    const ultima = new Date(fechas[fechas.length-1]);
+    const ultima = fechas.length ? new Date(fechas[fechas.length-1]) : new Date();
     mesFiltro = { year: ultima.getFullYear(), month: ultima.getMonth() };
     renderAll();
   } catch(e) {
